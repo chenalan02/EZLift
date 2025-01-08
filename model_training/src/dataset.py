@@ -13,11 +13,14 @@ def preproc_datasets(datasets, output_path, labels, split_ratios=[0.88, 0.08, 0.
         labels (List[str]): list of class names to keep in the output dataset
         split_ratios (List[float]): list of ratios to split the data into train, test, and validation sets
     """
+    random.seed(42)
 
     if os.path.exists(output_path):
         print(f"Output directory {output_path} already exists")
     else:
+        os.chdir("model_training")
         curr_dir = os.getcwd()
+
         # create output directory
         os.makedirs(output_path)
         for folder in ['train', 'test', 'valid']:
@@ -165,6 +168,6 @@ if __name__ == '__main__':
 
     output_path = r'datasets\combined_dataset'
     labels = ['box', 'pallet']
-    split_ratios=[0.88, 0.08, 0.04]
+    split_ratios=[0.9, 0.08, 0.02]
 
     preproc_datasets(datasets, output_path, labels, split_ratios)
