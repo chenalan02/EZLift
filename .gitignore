@@ -1,4 +1,4 @@
-Dataset/
+datasets/
 *.pt
 
 # Byte-compiled / optimized / DLL files
