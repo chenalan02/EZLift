@@ -8,7 +8,13 @@ def preproc_datasets(datasets, output_path, labels, split_ratios=[0.88, 0.08, 0.
     Combine multiple roboflow datasets in YOLO format into one dataset.
 
     Args:
-        datasets_paths (List[Dict[str, Union(str, Dict[str, str])]]): Dictionary of dataset paths and label changes
+        datasets_paths (List[Dict]): List of dictionaries of dataset paths and parameters
+            Dict:
+                path (str): path to the dataset
+                label_changes (Dict): dictionary of class name changes
+                exclude_from_val (bool): exclude dataset from validation set
+                keep_dupe_filenames (bool): filenames from roboflow datasets have the original filename before .rf. and a random string after
+                                            if True, keep all images, if False, remove duplicates of the original filenames (including augmentations)
         output_path (str): path to the output directory
         labels (List[str]): list of class names to keep in the output dataset
         split_ratios (List[float]): list of ratios to split the data into train, test, and validation sets
@@ -32,6 +38,7 @@ def preproc_datasets(datasets, output_path, labels, split_ratios=[0.88, 0.08, 0.
         # get class names, idx as dict
         dataset_names = []
         dataset_urls = []
+        dataset_summaries = []
 
         for dataset in datasets:
             dataset_path = dataset['path']
@@ -73,8 +80,15 @@ def preproc_datasets(datasets, output_path, labels, split_ratios=[0.88, 0.08, 0.
                     # copy label files
                     for file_name in os.listdir(labels_path):
                         images_processed += 1
+
+                        # get original file name
+                        if dataset['keep_dupe_filenames']:
+                            original_file_name = file_name.split('.txt')[0]
+                        else:
+                            original_file_name = file_name.split('rf')[0]
+
                         # check duplicate
-                        if file_name.split('rf')[0] in imgs_to_copy:
+                        if original_file_name in imgs_to_copy:
                             duplicates_skipped += 1
                             continue
                         
@@ -92,8 +106,12 @@ def preproc_datasets(datasets, output_path, labels, split_ratios=[0.88, 0.08, 0.
                                 line_split = line.split()
                                 class_idx = int(line_split[0])
 
+                                # convert to xywh format if in 11-point format
+                                if len(line_split) == 11:
+                                    line_split = _convert_11_to_xywh(line_split)
+
                                 # skip image if invalid bounding box
-                                if len(line_split) != 5 and len(line_split) != 11:
+                                elif len(line_split) != 5:
                                     if class_idx in label_conv_dict:
                                         new_txt = ""
                                         invalid_bb += 1
@@ -118,7 +136,7 @@ def preproc_datasets(datasets, output_path, labels, split_ratios=[0.88, 0.08, 0.
 
                             image_path = os.path.join(dataset_path, folder, 'images', file_name.replace('txt', 'jpg'))
                             image_copy_path = os.path.join(output_path, data_split, 'images', file_name.replace('txt', 'jpg'))
-                            imgs_to_copy[file_name.split('rf')[0]] = [image_path, image_copy_path]
+                            imgs_to_copy[original_file_name] = [image_path, image_copy_path]
 
                             images_copied += 1
 
@@ -126,6 +144,13 @@ def preproc_datasets(datasets, output_path, labels, split_ratios=[0.88, 0.08, 0.
                             other_labels += 1
 
                 print(f"Finished Processing {images_processed} images, {images_copied} to keep, {invalid_bb} invalid bounding boxes, {duplicates_skipped} duplicates, {other_labels} other labels")
+                dataset_summaries.append({
+                    'images_processed' : images_processed,
+                    'images_copied' : images_copied,
+                    'invalid_bb' : invalid_bb,
+                    'duplicates_skipped' : duplicates_skipped,
+                    'other_labels' : other_labels
+                })
 
             for path, copy_path in imgs_to_copy.values():
                 shutil.copyfile(path, copy_path)
@@ -139,35 +164,70 @@ def preproc_datasets(datasets, output_path, labels, split_ratios=[0.88, 0.08, 0.
             'names' : labels,
             'sources' : []
         }
-        for name, url in zip(dataset_names, dataset_urls):
-            yaml_file['sources'].append({'name' : name, 'url' : url})
+        for name, url, summary in zip(dataset_names, dataset_urls, dataset_summaries):
+            yaml_file['sources'].append({'name' : name, 'url' : url, 'summary' : summary})
 
         with open(os.path.join(output_path, 'data.yaml'), 'w') as file:
             yaml.dump(yaml_file, file)
+
+def _convert_11_to_xywh(bbox):
+    """
+    Convert bounding box from 11-point format to xywh format
+
+    Args:
+        bbox (List): list of bounding box coordinates in 11-point format (class_idx, x1, y1, x2, y2, x3, y3, x4, y4, x1, y2)
+
+    Returns:
+        List: bbox in xywh format
+    """
+    
+    # Extract coordinates from the given bounding box format
+    x1, y1 = float(bbox[1]), float(bbox[2])
+    x2, y2 = float(bbox[3]), float(bbox[4])
+    x3, y3 = float(bbox[5]), float(bbox[6])
+    x4, y4 = float(bbox[7]), float(bbox[8])
+
+    # Calculate the center coordinates (x_center, y_center)
+    x_center = (x1 + x2 + x3 + x4) / 4
+    y_center = (y1 + y2 + y3 + y4) / 4
+
+    # Calculate the width and height
+    width = (max(x1, x2, x3, x4) - min(x1, x2, x3, x4))
+    height = (max(y1, y2, y3, y4) - min(y1, y2, y3, y4))
+
+    # Return the bounding box in xywh format (relative values)
+    return [str(x_center), str(y_center), str(width), str(height)]
 
 if __name__ == '__main__':
 
     datasets = []
     datasets.append({
-        'path' : r'datasets\1000ware',
-        'label_changes' : {
-            'Box' : 'box',
-        },
-        'exclude_from_val': False
-    })
-    datasets.append({
-        'path' : r'datasets\industry_dataset3',
+        'path' : r'datasets\loco',
         'label_changes' : {},
-        'exclude_from_val': False
+        'exclude_from_val': False,
+        'keep_dupe_filenames': False
     })
     datasets.append({
         'path' : r'datasets\boxes',
         'label_changes' : {},
-        'exclude_from_val': True
+        'exclude_from_val': False,
+        'keep_dupe_filenames': False
     })
-
+    datasets.append({
+        'path' : r'datasets\box_detection',
+        'label_changes' : {},
+        'exclude_from_val': False,
+        'keep_dupe_filenames': False
+    })
+    datasets.append({
+        'path' : r'datasets\indoor',
+        'label_changes' : {},
+        'exclude_from_val': False,
+        'keep_dupe_filenames': True
+    })
     output_path = r'datasets\combined_dataset'
     labels = ['box', 'pallet']
     split_ratios=[0.9, 0.08, 0.02]
 
     preproc_datasets(datasets, output_path, labels, split_ratios)
+
