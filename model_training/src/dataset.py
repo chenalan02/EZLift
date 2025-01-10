@@ -180,7 +180,8 @@ def _convert_11_to_xywh(bbox):
     Returns:
         List: bbox in xywh format
     """
-    
+    cls = bbox[0]
+
     # Extract coordinates from the given bounding box format
     x1, y1 = float(bbox[1]), float(bbox[2])
     x2, y2 = float(bbox[3]), float(bbox[4])
@@ -196,7 +197,7 @@ def _convert_11_to_xywh(bbox):
     height = (max(y1, y2, y3, y4) - min(y1, y2, y3, y4))
 
     # Return the bounding box in xywh format (relative values)
-    return [str(x_center), str(y_center), str(width), str(height)]
+    return [cls, str(x_center), str(y_center), str(width), str(height)]
 
 if __name__ == '__main__':
 
