@@ -4,18 +4,18 @@ if __name__ == '__main__':
     # https://docs.ultralytics.com/modes/train/#train-settings
 
     model = YOLO("yolo11n.pt")
-    data = "model_training/datasets/combined_dataset/data.yaml"
+    data = "model_training/datasets/pallets_dataset/data.yaml"
     device = 0
 
     imgsz = 640
-    epochs = 50
+    epochs = 70
     batch = 16
     patience = 5
     lr0 = 0.01
     dropout = 0.0
 
     resume = False # resume training
-    multi_scale = True # vary img-size
+    multi_scale = True # vary img-size 
     close_mosaic = 5 # disables mosaic in last N epochs
     pretrained = True
     exist_ok = False # True to overwtite run dir

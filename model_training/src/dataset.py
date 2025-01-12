@@ -209,26 +209,14 @@ if __name__ == '__main__':
         'keep_dupe_filenames': False
     })
     datasets.append({
-        'path' : r'datasets\boxes',
-        'label_changes' : {},
-        'exclude_from_val': False,
-        'keep_dupe_filenames': False
-    })
-    datasets.append({
-        'path' : r'datasets\box_detection',
-        'label_changes' : {},
-        'exclude_from_val': False,
-        'keep_dupe_filenames': False
-    })
-    datasets.append({
         'path' : r'datasets\indoor',
         'label_changes' : {},
         'exclude_from_val': False,
         'keep_dupe_filenames': True
     })
-    output_path = r'datasets\combined_dataset'
-    labels = ['box', 'pallet']
-    split_ratios=[0.9, 0.08, 0.02]
+    output_path = r'datasets\pallets_dataset'
+    labels = ['pallet']
+    split_ratios=[0.86, 0.02, 0.12]
 
     preproc_datasets(datasets, output_path, labels, split_ratios)
 
