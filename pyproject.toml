@@ -6,15 +6,19 @@ authors = [
     {name = "Your Name",email = "you@example.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.9"
-dependencies = [
-    "opencv-python (>=4.11.0.86,<5.0.0.0)",
-    "vosk (>=0.3.45,<0.4.0)",
-    "pyserial (>=3.5,<4.0)",
-    "sounddevice (>=0.5.1,<0.6.0)",
-    "rpi-gpio (>=0.7.1,<0.8.0)",
-    "tflite-runtime (>=2.14.0,<3.0.0)"
-]
+requires-python = ">=3.11"
+
+[tool.poetry.dependencies]
+python = "3.11.2"
+opencv-python = "*"
+vosk = "*"
+pyserial = "*"
+sounddevice = "*"
+rpi-gpio = "*"
+tflite-runtime = "*"
+ultralytics = "*"
+numpy = "==1.24.2"
+torch = "<=2.5.1"
 
 [tool.poetry]
 package-mode = false
