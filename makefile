@@ -1,29 +1,18 @@
-PYTHON_VERSION=3.9.18
-VENV_NAME=myenv
+PYTHON_VERSION=3.11.2
+VENV_NAME=env
 
 .PHONY: setup install activate
 
-# Install the required Python version using pyenv
+# Install the venv
 setup:
-	pyenv install -s $(PYTHON_VERSION)
-	pyenv virtualenv -f $(PYTHON_VERSION) $(VENV_NAME)
-	pyenv activate $(VENV_NAME)
-	pip install --upgrade pip
-	pip install poetry
+	python$(PYTHON_VERSION) -m pip install --upgrade pip
+	curl -sSL https://install.python-poetry.org | python3 -
+	poetry config virtualenvs.in-project true
+	python -m venv --system-site-packages $(VENV_NAME)
 
-# Install dependencies with poetry
 install:
-	poetry install
-
-# Activate the virtual environment
-activate:
-	pyenv activate $(VENV_NAME)
-
-# Deactivate the virtual environment
-deactivate:
-	pyenv deactivate
+	$(VENV_NAME)/bin/poetry install
 
 # Cleanup environment
 clean:
-	pyenv uninstall -f $(VENV_NAME)
-	rm -rf .venv
+	rm -rf $(VENV_NAME)
