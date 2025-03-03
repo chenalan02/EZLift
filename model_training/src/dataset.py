@@ -128,7 +128,7 @@ def preproc_datasets(datasets, output_path, labels, split_ratios=[0.88, 0.08, 0.
                             continue
 
                         # only copy relevant files
-                        elif len(new_txt) > 0:
+                        elif len(new_txt) > 0 or dataset['keep_empty_imgs']:
                             
                             labels_copy_path = os.path.join(output_path, data_split, 'labels', file_name)
                             with open(labels_copy_path, 'w') as write_file:
@@ -206,15 +206,17 @@ if __name__ == '__main__':
         'path' : r'datasets\loco',
         'label_changes' : {},
         'exclude_from_val': False,
-        'keep_dupe_filenames': False
+        'keep_dupe_filenames': False,
+        'keep_empty_imgs': True
     })
     datasets.append({
         'path' : r'datasets\indoor',
         'label_changes' : {},
         'exclude_from_val': False,
-        'keep_dupe_filenames': True
+        'keep_dupe_filenames': True,
+        'keep_empty_imgs': True
     })
-    output_path = r'datasets\pallets_dataset'
+    output_path = r'datasets\pallets_dataset_with_negatives'
     labels = ['pallet']
     split_ratios=[0.86, 0.02, 0.12]
 

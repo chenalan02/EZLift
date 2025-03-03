@@ -4,11 +4,11 @@ if __name__ == '__main__':
     # https://docs.ultralytics.com/modes/train/#train-settings
 
     model = YOLO("yolo11n.pt")
-    data = "model_training/datasets/pallets_dataset/data.yaml"
+    data = "model_training/datasets/pallets_dataset_with_negatives/data.yaml"
     device = 0
 
     imgsz = 640
-    epochs = 70
+    epochs = 30
     batch = 16
     patience = 5
     lr0 = 0.01
@@ -18,7 +18,7 @@ if __name__ == '__main__':
     multi_scale = True # vary img-size 
     close_mosaic = 5 # disables mosaic in last N epochs
     pretrained = True
-    exist_ok = False # True to overwtite run dir
+    exist_ok = False # True to overwrite run dir
     profile = True # enables profiling of ONNX and TensorRT
     plots = True
 
