@@ -19,6 +19,11 @@ tflite-runtime = "*"
 ultralytics = "*"
 numpy = "==1.24.2"
 torch = "<=2.5.1"
+pyaudio = "*"
+pvporcupine = "*"
+pvrhino = "*"
+spidev = "*"
+pvrecorder = "*"
 
 [tool.poetry]
 package-mode = false

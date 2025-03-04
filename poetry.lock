@@ -1164,6 +1164,42 @@ dev = ["abi3audit", "black (==24.10.0)", "check-manifest", "coverage", "packagin
 test = ["pytest", "pytest-xdist", "setuptools"]
 
 [[package]]
+name = "pvporcupine"
+version = "3.0.5"
+description = "Porcupine wake word engine."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "pvporcupine-3.0.5-py3-none-any.whl", hash = "sha256:b80b31a38b1a622e492e19683f60efdcddd1662204830fcad50df90f01723356"},
+    {file = "pvporcupine-3.0.5.tar.gz", hash = "sha256:48f92ab10a904b811e69afb18175d2bd4857ccec8be094f42449961a80fa2af1"},
+]
+
+[[package]]
+name = "pvrecorder"
+version = "1.2.5"
+description = "Recorder library for Picovoice."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "pvrecorder-1.2.5-py3-none-any.whl", hash = "sha256:2c4679f7a8f0efebf87a911e75027238b98af4dbb009fa7b18f02c6f0488bd61"},
+    {file = "pvrecorder-1.2.5.tar.gz", hash = "sha256:70841125b3b33a759573dfb29b4ad787e11257065c452d7a5911b9ce793dfa6f"},
+]
+
+[[package]]
+name = "pvrhino"
+version = "3.0.5"
+description = "Rhino Speech-to-Intent engine."
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "pvrhino-3.0.5-py3-none-any.whl", hash = "sha256:bbb4cac565d114aff710b5fcc0fb85a712c706c68bf03912935e59ea1c88e8a3"},
+    {file = "pvrhino-3.0.5.tar.gz", hash = "sha256:01698dd6320427168f3a7c4b4376a08c75a6b03a76a0a1cacb96a5114b64faed"},
+]
+
+[[package]]
 name = "py-cpuinfo"
 version = "9.0.0"
 description = "Get CPU info with pure Python"
@@ -1174,6 +1210,32 @@ files = [
     {file = "py-cpuinfo-9.0.0.tar.gz", hash = "sha256:3cdbbf3fac90dc6f118bfd64384f309edeadd902d7c8fb17f02ffa1fc3f49690"},
     {file = "py_cpuinfo-9.0.0-py3-none-any.whl", hash = "sha256:859625bc251f64e21f077d099d4162689c762b5d6a4c3c97553d56241c9674d5"},
 ]
+
+[[package]]
+name = "pyaudio"
+version = "0.2.14"
+description = "Cross-platform audio I/O with PortAudio"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "PyAudio-0.2.14-cp310-cp310-win32.whl", hash = "sha256:126065b5e82a1c03ba16e7c0404d8f54e17368836e7d2d92427358ad44fefe61"},
+    {file = "PyAudio-0.2.14-cp310-cp310-win_amd64.whl", hash = "sha256:2a166fc88d435a2779810dd2678354adc33499e9d4d7f937f28b20cc55893e83"},
+    {file = "PyAudio-0.2.14-cp311-cp311-win32.whl", hash = "sha256:506b32a595f8693811682ab4b127602d404df7dfc453b499c91a80d0f7bad289"},
+    {file = "PyAudio-0.2.14-cp311-cp311-win_amd64.whl", hash = "sha256:bbeb01d36a2f472ae5ee5e1451cacc42112986abe622f735bb870a5db77cf903"},
+    {file = "PyAudio-0.2.14-cp312-cp312-win32.whl", hash = "sha256:5fce4bcdd2e0e8c063d835dbe2860dac46437506af509353c7f8114d4bacbd5b"},
+    {file = "PyAudio-0.2.14-cp312-cp312-win_amd64.whl", hash = "sha256:12f2f1ba04e06ff95d80700a78967897a489c05e093e3bffa05a84ed9c0a7fa3"},
+    {file = "PyAudio-0.2.14-cp313-cp313-win32.whl", hash = "sha256:95328285b4dab57ea8c52a4a996cb52be6d629353315be5bfda403d15932a497"},
+    {file = "PyAudio-0.2.14-cp313-cp313-win_amd64.whl", hash = "sha256:692d8c1446f52ed2662120bcd9ddcb5aa2b71f38bda31e58b19fb4672fffba69"},
+    {file = "PyAudio-0.2.14-cp38-cp38-win32.whl", hash = "sha256:858caf35b05c26d8fc62f1efa2e8f53d5fa1a01164842bd622f70ddc41f55000"},
+    {file = "PyAudio-0.2.14-cp38-cp38-win_amd64.whl", hash = "sha256:2dac0d6d675fe7e181ba88f2de88d321059b69abd52e3f4934a8878e03a7a074"},
+    {file = "PyAudio-0.2.14-cp39-cp39-win32.whl", hash = "sha256:f745109634a7c19fa4d6b8b7d6967c3123d988c9ade0cd35d4295ee1acdb53e9"},
+    {file = "PyAudio-0.2.14-cp39-cp39-win_amd64.whl", hash = "sha256:009f357ee5aa6bc8eb19d69921cd30e98c42cddd34210615d592a71d09c4bd57"},
+    {file = "PyAudio-0.2.14.tar.gz", hash = "sha256:78dfff3879b4994d1f4fc6485646a57755c6ee3c19647a491f790a0895bd2f87"},
+]
+
+[package.extras]
+test = ["numpy"]
 
 [[package]]
 name = "pycparser"
@@ -1463,6 +1525,18 @@ CFFI = ">=1.0"
 
 [package.extras]
 numpy = ["NumPy"]
+
+[[package]]
+name = "spidev"
+version = "3.6"
+description = "Python bindings for Linux SPI access through spidev"
+optional = false
+python-versions = "*"
+groups = ["main"]
+files = [
+    {file = "spidev-3.6-cp39-cp39-linux_armv7l.whl", hash = "sha256:280abc00a1ef7780ef62c3f294f52a2527b6c47d8c269fea98664970bcaf6da5"},
+    {file = "spidev-3.6.tar.gz", hash = "sha256:14dbc37594a4aaef85403ab617985d3c3ef464d62bc9b769ef552db53701115b"},
+]
 
 [[package]]
 name = "srt"
@@ -1851,4 +1925,4 @@ files = [
 [metadata]
 lock-version = "2.1"
 python-versions = "3.11.2"
-content-hash = "7c17fcefa7cd9c959658baaac3509e23cb2ed29a244d9990b319417dd411c467"
+content-hash = "5b8bd26884429aecd5858fa9abe6c8e5c2f98f1ec4c8f8f7fe9035c52aa7000e"
