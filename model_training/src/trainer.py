@@ -3,12 +3,12 @@ from ultralytics import YOLO
 if __name__ == '__main__':
     # https://docs.ultralytics.com/modes/train/#train-settings
 
-    model = YOLO("yolo11n.pt")
+    model = YOLO("yolov8n.pt")
     data = "model_training/datasets/pallets_dataset_with_negatives/data.yaml"
     device = 0
 
     imgsz = 640
-    epochs = 30
+    epochs = 1
     batch = 16
     patience = 5
     lr0 = 0.01
