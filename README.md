@@ -5,6 +5,7 @@
 #### Update Pi OS
 ```bash
 sudo apt update && sudo apt upgrade -y
+sudo apt-get install portaudio19-dev libatlas-base-dev
 ```
 
 #### Install Audio Drivers
