@@ -39,3 +39,7 @@ source env/bin/activate
 env/bin/poetry install
 ```
 
+#### Install Edge TPU runtime
+```bash
+https://docs.ultralytics.com/guides/coral-edge-tpu-on-raspberry-pi/#installation-walkthrough
+```
