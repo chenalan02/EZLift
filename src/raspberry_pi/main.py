@@ -24,7 +24,7 @@ if __name__ == "__main__":
     access_key="Dwi/yCZhuIbXGkKPNbK/vgoCuRjzFs9XrqZpEmD6mDLGVyYrFv4MuQ=="
     yolo_path = "/home/pi/EZLift/src/raspberry_pi/256_edgetpu.tflite"
 
-    camera_thread = CameraThread(shm.name, frame.shape, frame.dtype, lock, sleep_time=0.1)
+    camera_thread = CameraThread(shm.name, frame.shape, frame.dtype, lock)
     yolo_proc = YOLOProcess(shm.name, frame.shape, frame.dtype, lock, yolo_path)
     voice_thread = VoiceThread(cmd_queue, access_key, wake_model_path, intent_model_path)
 

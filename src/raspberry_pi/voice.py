@@ -6,7 +6,7 @@ from pvrecorder import PvRecorder
 import time
 import numpy as np
 
-class VoiceProcess(threading.Thread):
+class VoiceThread(threading.Thread):
     def __init__(self, command_queue, access_key, wake_model_path, intent_model_path, wake_sens=0.7, intent_sens=0.7):
         super().__init__()
         self.porcupine = pvporcupine.create(keyword_paths=[wake_model_path],

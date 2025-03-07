@@ -7,7 +7,7 @@ import os
 import numpy as np
 
 class CameraThread(threading.Thread):
-    def __init__(self, shm_name, shape, dtype, lock, sleep_time=0.1):
+    def __init__(self, shm_name, shape, dtype, lock):
         super().__init__()
 
         os.environ["DISPLAY"] = ":0"
@@ -21,7 +21,6 @@ class CameraThread(threading.Thread):
         self.shared_memory = SharedMemory(name=shm_name)
         self.shared_frame  = np.ndarray(shape, dtype=dtype, buffer=self.shared_memory.buf)
         self.lock = lock
-        self.sleep_time = sleep_time
         print("cam_init")
 
     def run(self):
