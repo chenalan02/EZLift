@@ -28,6 +28,6 @@ class CameraThread(threading.Thread):
             frame = self.picam2.capture_array()
             with self.lock:
                 np.copyto(self.shared_frame, frame)
-                print(1)
+
             time.sleep(0.02)
 
