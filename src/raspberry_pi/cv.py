@@ -5,6 +5,7 @@ import cv2
 from ultralytics import YOLO
 import time
 import numpy as np
+from collections import deque
 
 class YOLOProcess(multiprocessing.Process):
     def __init__(self, shm_name, shape, dtype, lock, model_path, confidence_threshold=0.5):
@@ -18,17 +19,18 @@ class YOLOProcess(multiprocessing.Process):
         print("cv_init")
 
     def run(self):
+        fps_queue = deque(maxlen=10)
         while True:
             with self.lock:
-                start_time = time.time()
+                curr_time = time.time()
 
                 frame = np.copy(self.shared_frame)
-                start_time = time.time()
                 results = self.model.predict(frame, device="tpu:0", imgsz=256, verbose=False)
 
-                end_time = time.time()
-                self.fps = 1.0 / (end_time - start_time)
-                print(f"FPS: {self.fps:.2f}")
+                self.fps = 1.0 / (time.time() - curr_time)
+                fps_queue.append(self.fps)
+                avg_fps = sum(fps_queue) / len(fps_queue)
+                print(f"FPS: {avg_fps:.2f}")
                 ### do something with results
 
-            time.sleep(0.05)
+            time.sleep(0.02)
