@@ -7,7 +7,7 @@ from multiprocessing.shared_memory import SharedMemory
 
 from camera import CameraThread
 from cv import YOLOProcess
-from voice import VoiceProcess
+from voice import VoiceThread
 
 if __name__ == "__main__":
     
@@ -26,11 +26,11 @@ if __name__ == "__main__":
 
     camera_thread = CameraThread(shm.name, frame.shape, frame.dtype, lock, sleep_time=0.1)
     yolo_proc = YOLOProcess(shm.name, frame.shape, frame.dtype, lock, yolo_path)
-    voice_proc = VoiceProcess(cmd_queue, access_key, wake_model_path, intent_model_path)
+    voice_thread = VoiceThread(cmd_queue, access_key, wake_model_path, intent_model_path)
 
-    voice_proc.start()
     camera_thread.start()
     yolo_proc.start()
+    voice_thread.start()
 
     try:
         while True:
@@ -50,9 +50,9 @@ if __name__ == "__main__":
             yolo_proc.join(timeout=1)
 
         # Terminate Voice process
-        if voice_proc.is_alive():
-            voice_proc.terminate()
-            voice_proc.join(timeout=1)
+        if voice_thread.is_alive():
+            voice_thread.terminate()
+            voice_thread.join(timeout=1)
 
         print("Closing shared memory resources...")
         shm.close()
