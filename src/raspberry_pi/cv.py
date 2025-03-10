@@ -30,7 +30,7 @@ class YOLOProcess(multiprocessing.Process):
                 self.fps = 1.0 / (time.time() - curr_time)
                 fps_queue.append(self.fps)
                 avg_fps = sum(fps_queue) / len(fps_queue)
-                print(f"FPS: {avg_fps:.2f}")
+                # print(f"FPS: {avg_fps:.2f}")
                 ### do something with results
 
             time.sleep(0.02)

@@ -7,7 +7,7 @@ import time
 import numpy as np
 
 class VoiceThread(threading.Thread):
-    def __init__(self, command_queue, access_key, wake_model_path, intent_model_path, wake_sens=0.7, intent_sens=0.7):
+    def __init__(self, command_queue, access_key, wake_model_path, intent_model_path, wake_sens=0.9, intent_sens=0.9):
         super().__init__()
         self.porcupine = pvporcupine.create(keyword_paths=[wake_model_path],
                                             access_key=access_key,
@@ -22,9 +22,10 @@ class VoiceThread(threading.Thread):
         print("voice_init")
 
     def run(self):
+        
+        awoken = False
         while True:
             pcm = self.recorder.read()
-            awoken = False
 
             if not awoken:
                 if self.porcupine.process(pcm) >= 0:
@@ -36,4 +37,3 @@ class VoiceThread(threading.Thread):
                     self.command_queue.put(self.rhino.get_inference())
                     print(inference)
                     awoken = False
-            time.sleep(0.05)
