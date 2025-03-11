@@ -5,6 +5,7 @@ from picamera2 import Picamera2
 import time
 import os
 import numpy as np
+import cv2
 
 class CameraThread(threading.Thread):
     def __init__(self, shm_name, shape, dtype, lock):
@@ -26,6 +27,7 @@ class CameraThread(threading.Thread):
     def run(self):
         while True:
             frame = self.picam2.capture_array()
+            frame = cv2.resize(frame, (256, 256))
             with self.lock:
                 np.copyto(self.shared_frame, frame)
 

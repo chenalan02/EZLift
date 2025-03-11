@@ -1,10 +1,7 @@
-import multiprocessing
 import threading
 import pvporcupine
 import pvrhino
 from pvrecorder import PvRecorder
-import time
-import numpy as np
 
 class VoiceThread(threading.Thread):
     def __init__(self, command_queue, access_key, wake_model_path, intent_model_path, wake_sens=0.9, intent_sens=0.9):
