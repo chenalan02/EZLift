@@ -1,45 +1,280 @@
 import numpy as np
 import cv2
 import math
-import multiprocessing
+import multiprocessing as mp
+import threading
 import time
 import queue
+import serial
 
-SHELF_HEIGHT = 0
+import RPi.GPIO as GPIO
+from queue import Empty
+from collections import deque
 
-class ControlsProcess(multiprocessing.Process):
+ESTOP_BUTTON = 17
+
+PALLET_CLS_ID = 0
+ANGLE_THRESH = 2 # error in degrees
+DIST_THRESH = 0.05 # error in ratio (pallet width compared to image width)
+CENTER_THRESH = 5 # error in horizontal pixel s
+INIT_DIST_TARGET = 0.4 # ratio to approach box on initial search loop
+DIST_TARGET = 0.6 # ratio to approach box on subsequent search loops
+ERROR_QUEUE_MAXLEN = 10
+
+class ControlsProcess(mp.Process):
     def __init__(self, cv_results_queue, cmd_queue):
         super().__init__()
         self.cv_results_queue = cv_results_queue
         self.command_queue = cmd_queue
+        self.shutdown_event = mp.Event()
+        
+        self.initial_search_loop = True
+        self.center_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+        self.dist_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+        self.angle_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+
         self.idle = True
         self.command = None
+        self.action_phase = 'Turn' # Angle, Forwards, Sideways, Lift
 
-        self.serial_send_queue = queue.queue()
-        self.serial_recv_queue = queue.queue()
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(ESTOP_BUTTON, GPIO.IN)
+
+        self.serial_send_queue = queue.Queue()
+        # self.serial_read_queue = queue.Queue()
+        self.serial_port = serial.Serial("/dev/ttyACM0", 9600)
         
         print("controls_init")
 
-    def _get_bbox_error(self, bbox, frame_shape):
-        frame_center = (frame_shape[1]//2, frame_shape[0]//2)
-        bbox_center = ((bbox[0]+bbox[2])//2, (bbox[1]+bbox[3])//2)
-        return frame_center[0] - bbox_center[0], frame_center[1] - bbox_center[1]
-    
-    def _get_angle_error(self, bbox, frame_shape):
-        frame_center = (frame_shape[1]//2, frame_shape[0]//2)
-        bbox_center = ((bbox[0]+bbox[2])//2, (bbox[1]+bbox[3])//2)
-        return math.atan2(bbox_center[1] - frame_center[1], bbox_center[0] - frame_center[0])
+
+    def _hough_line_detection(img, canny_low=150, canny_high=450, hough_thresh=45, min_len=20, max_gap=7):
+        # Get edges using Canny
+        edges = edges = cv2.Canny(img, canny_low, canny_high)
+
+        # Detect lines using Hough Transform
+        lines = cv2.HoughLinesP(edges, 
+                                rho=1,            # Distance resolution of accumulator in pixels
+                                theta=np.pi / 180, # Angle resolution of accumulator in radians
+                                threshold=hough_thresh, # Minimum number of votes (intersections in Hough grid cell)
+                                minLineLength=min_len,  # Minimum length of line (pixels)
+                                maxLineGap=max_gap)     # Maximum allowed gap between points on the same line
+        return lines
+
+    # Get the angle of the shelf relative to the camera
+    def _get_angle_from_lines(lines, angle_thresh=2):
+
+        lines_polar = []
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            dx = x2 - x1
+            dy = y2 - y1
+            angle_rad = math.atan2(-dy, dx)
+            angle_deg = math.degrees(angle_rad)
+            angle_deg = (angle_deg + 360) % 360
+            length = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+            lines_polar.append((angle_deg, length))
+
+        lines_polar = sorted(lines_polar, key=lambda x: x[0])
+        groups = []
+        current_group = [lines_polar[0]]
+
+        for angle, length in lines_polar[1:]:
+            if abs(angle - current_group[-1][0]) < angle_thresh:
+                current_group.append((angle, length))
+            else:
+                groups.append(current_group)
+                current_group = [(angle, length)]
+        groups.append(current_group)
+
+        best_metric = 0
+        best_angle = None
+        for group in groups:
+            avg_length = np.mean([length for _, length in group])
+            if len(group) * avg_length**1.5 > best_metric:
+                avg_angle = np.mean([angle for angle, _ in group])
+                if not (avg_angle < 90 + angle_thresh and avg_angle > 90 - angle_thresh):
+                    best_metric = len(group) * avg_length**1.5
+                    best_angle = np.mean([angle for angle, _ in group])
+
+        return best_angle
+
+    def _get_angle_error(self, bbox, img):
+
+        img_cropped = img[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+        lines = self._hough_line_detection(img_cropped)
+        angle = self._get_angle_from_lines(lines)
+        if angle > 180:
+            angle -= 180
+        if angle > 90:
+            error = angle - 180
+        else:
+            error = angle
+            return error
+
+    def _get_distance_error(self, bbox, img, desired_bbox_ratio=0.5):
+
+        bbox_ratio = abs(bbox[2] - bbox[0]) / img.shape[1]
+        error = desired_bbox_ratio - bbox_ratio
+        return error
+
+    def _get_center_error(self, bbox, img):
+
+        bbox_center = (bbox[0] + bbox[2]) / 2
+        img_center = img.shape[1] / 2
+        error = img_center - bbox_center
+        return error
+
+    def _PD_controller(self, errors, kp=5, kd=0.1):
+        error = errors[0]
+        # initial case
+        if len(errors) < 2:
+            derivative = 0
+        else:
+            derivative = errors[0] - errors[1]
+        output = kp * error + kd * derivative
+        return output
+
+    def _get_most_conf_box(self, bbox, conf, cls_id):
+        best_i = 0
+        best_conf = 0
+        for i in range(len(conf)):
+            if cls_id[i] == PALLET_CLS_ID:
+                if conf[i] > best_conf:
+                    best_conf = conf[i]
+                    best_i = i
+        return bbox[best_i]
+
 
     def run(self):
-        while True:
-            if self.idle:
-                if not self.command_queue.empty():
-                    self.command = self.command_queue.get()
-                    self.idle = False
-                time.sleep(0.05)
 
-            elif self.command == "pickup":
-                self.pickup()
+        # serial_read_thread = threading.Thread(target=self.serial_read_queue)
+        serial_write_thread = threading.Thread(target=self.serial_writer)
+        # serial_read_thread.start()
+        serial_write_thread.start()
 
-            elif self.command == "drop":
-                self.drop()
+        try:
+            while True:
+                # get cv results from queue
+                if not self.cv_results_queue.empty():
+                    bboxes, frame, conf, cls_id = self.cv_results_queue.get()
+                    if len(bboxes) > 0:
+                        bbox = self._get_most_conf_box(bboxes, conf, cls_id)
+                    empty_frame = False
+                else:
+                    empty_frame = True
+
+                # check if estop pressed
+                if GPIO.input(ESTOP_BUTTON) == 0:
+                    print("Emergency stop button pressed")
+                    self.idle = True
+                    self.serial_send_queue.put(f"turn:0\n")
+                    self.serial_send_queue.put(f"forwards:0\n")
+                    self.serial_send_queue.put(f"side:0\n")
+
+                # check command queue when idle
+                if self.idle:
+                    if not self.command_queue.empty():
+                        self.command = self.command_queue.get()
+                        self.action_phase = 'Turn'
+                        self.idle = False
+                        self.initial_search_loop = True
+                        # initialize errors to small values
+                        self.center_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+                        self.dist_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+                        self.angle_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+                        self.center_errors.append(40)
+                        self.dist_errors.append(10)
+                        self.angle_errors.append(0.05)
+                    
+                # pickup box
+                elif self.command == "pickup":
+                    if self.action_phase == 'Turn':
+                        # get bbox error
+                        if not empty_frame:
+                            self.center_errors.append(self._get_center_error(bbox, frame))
+                        # get PD controller output
+                        turn_voltage = self._PD_controller(self.center_errors, kp=5, kd=0.1)
+                        # send turn command
+                        self.serial_send_queue.put(f"turn:{turn_voltage}\n")
+                        # check turn end condition
+                        if all([abs(e) < CENTER_THRESH for e in self.center_errors]):
+                            # self.center_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+                            self.serial_send_queue.put(f"turn:0\n")
+                            self.action_phase = 'Forwards'
+ 
+                    elif self.action_phase == 'Forwards':
+                        if not empty_frame:
+                            # different distance for first search loop
+                            if self.initial_search_loop:
+                                self.dist_errors.append(self._get_distance_error(bbox, frame, desired_bbox_ratio=INIT_DIST_TARGET))
+                            else:
+                                self.dist_errors.append(self._get_distance_error(bbox, frame, desired_bbox_ratio=DIST_TARGET))
+                        # get PD controller output
+                        forwards_voltage = self._PD_controller(self.dist_errors, kp=20, kd=1)
+                        # send move command
+                        self.serial_send_queue.put(f"forwards:{forwards_voltage}\n")
+                        # check forward end condition
+                        if all([abs(e) < DIST_THRESH for e in self.dist_errors]):
+                            # self.dist_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+                            self.serial_send_queue.put(f"forwards:0\n")
+                            self.action_phase = 'Sideways'
+
+                    elif self.action_phase == 'Sideways':
+                        if not empty_frame:
+                            self.angle_errors.append(self._get_angle_error(bbox, frame))
+                        # get PD controller output
+                        side_voltage = self._PD_controller(self.angle_errors, kp=2, kd=0.1)
+                        # send move command
+                        self.serial_send_queue.put(f"side:{side_voltage}\n")
+                        # # check search end condition
+                        if all([abs(e) < ANGLE_THRESH for e in self.angle_errors]) and all([abs(e) < CENTER_THRESH for e in self.center_errors]) and all([abs(e) < DIST_THRESH for e in self.dist_errors]):
+                            # self.angle_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+                            # self.center_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+                            # self.dist_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+                            self.serial_send_queue.put(f"turn:0\n")
+                            self.serial_send_queue.put(f"forwards:0\n")
+                            self.serial_send_queue.put(f"side:0\n")
+                            self.action_phase = 'Lift'
+                        # check side end condition
+                        elif all([abs(e) < ANGLE_THRESH for e in self.angle_errors]):
+                            # self.angle_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+                            self.serial_send_queue.put(f"side:0\n")
+                            self.action_phase = 'Turn'
+                            self.initial_search_loop = False
+                    
+                    elif self.action_phase == 'Lift':
+                        print("Lifting box")
+                        time.sleep(1)
+
+                elif self.command == "drop":
+                    pass
+        
+        except KeyboardInterrupt:
+            print("Controls Process Interrupted by user, shutting down.")
+        
+        finally:
+            print("[ControlsProcess] Shutting down...")
+            self.shutdown_event.set()
+
+            # Wait for threads to finish
+            # serial_read_thread.join()
+            serial_write_thread.join()
+
+            # Close serial port
+            self.serial_port.close()
+            print("[ControlsProcess] Process exiting cleanly.")
+
+        time.sleep(0.05)
+
+    def serial_writer(self):
+        """Reads commands from send queue and writes them to serial port."""
+        while not self.shutdown_event.is_set():
+            try:
+                cmd = self.serial_send_queue.get(timeout=1)
+                self.serial_port.write(cmd.encode())
+                print(f"[Serial Writer] Sent: {cmd.strip()}")
+            except Empty:
+                pass
+            except Exception as e:
+                print(f"[Serial Writer] Error: {e}")
+                time.sleep(0.1)
