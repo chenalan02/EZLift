@@ -5,11 +5,13 @@ import pickle
 import cv2
 
 from multiprocessing.shared_memory import SharedMemory
+from queue import Empty
 
 from camera import CameraThread
 from controls import ControlsProcess
 from cv import YOLOProcess
 from voice import VoiceThread
+
 
 if __name__ == "__main__":
     
@@ -30,7 +32,7 @@ if __name__ == "__main__":
     
     controls_proc= ControlsProcess(cv_results_queue, cmd_queue)
     camera_thread = CameraThread(shm.name, frame.shape, frame.dtype, lock)
-    yolo_proc = YOLOProcess(shm.name, frame.shape, frame.dtype, lock, yolo_path)
+    yolo_proc = YOLOProcess(cv_results_queue, shm.name, frame.shape, frame.dtype, lock, yolo_path)
     voice_thread = VoiceThread(cmd_queue, access_key, wake_model_path, intent_model_path)
 
     controls_proc.start()

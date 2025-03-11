@@ -148,7 +148,7 @@ class ControlsProcess(mp.Process):
     def run(self):
 
         # serial_read_thread = threading.Thread(target=self.serial_read_queue)
-        serial_write_thread = threading.Thread(target=self.serial_send_queue)
+        serial_write_thread = threading.Thread(target=self.serial_writer)
         # serial_read_thread.start()
         serial_write_thread.start()
 
@@ -157,7 +157,8 @@ class ControlsProcess(mp.Process):
                 # get cv results from queue
                 if not self.cv_results_queue.empty():
                     bboxes, frame, conf, cls_id = self.cv_results_queue.get()
-                    bbox = self._get_most_conf_box(bboxes, conf, cls_id)
+                    if len(bboxes) > 0:
+                        bbox = self._get_most_conf_box(bboxes, conf, cls_id)
                     empty_frame = False
                 else:
                     empty_frame = True

@@ -1,7 +1,5 @@
-import threading
 import multiprocessing as mp
 from multiprocessing.shared_memory import SharedMemory
-import cv2
 from ultralytics import YOLO
 import time
 import numpy as np
@@ -21,19 +19,21 @@ class YOLOProcess(mp.Process):
 
     def run(self):
         # fps_queue = deque(maxlen=10)
+        # curr_time = time.time()
         while True:
             with self.lock:
-                
+
                 frame = np.copy(self.shared_frame)
                 results = self.model.predict(frame, device="tpu:0", imgsz=256, verbose=False)[0]
                 bboxes = results.boxes.xyxy.cpu().numpy()
-                conf = results.conf.cpu().numpy()
+                conf = results.boxes.conf.cpu().numpy()
                 cls_id = results.boxes.cls.cpu().numpy()
                 orig_img = results.orig_img
                 self.cv_results_queue.put((bboxes, orig_img, conf, cls_id))
 
+                # prev_time = curr_time
                 # curr_time = time.time()
-                # self.fps = 1.0 / (time.time() - curr_time)
+                # self.fps = 1.0 / (curr_time - prev_time)
                 # fps_queue.append(self.fps)
                 # avg_fps = sum(fps_queue) / len(fps_queue)
                 # print(f"FPS: {avg_fps:.2f}")
