@@ -168,9 +168,7 @@ class ControlsProcess(mp.Process):
                 if GPIO.input(ESTOP_BUTTON) == 0:
                     print("Emergency stop button pressed")
                     self.idle = True
-                    self.serial_send_queue.put(f"turn:0\n")
-                    self.serial_send_queue.put(f"forwards:0\n")
-                    self.serial_send_queue.put(f"side:0\n")
+                    self.serial_send_queue.put(f"stop\n")
 
                 # check command queue when idle
                 if self.idle:
@@ -200,7 +198,7 @@ class ControlsProcess(mp.Process):
                         # check turn end condition
                         if all([abs(e) < CENTER_THRESH for e in self.center_errors]):
                             # self.center_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
-                            self.serial_send_queue.put(f"turn:0\n")
+                            self.serial_send_queue.put(f"stop\n")
                             self.action_phase = 'Forwards'
  
                     elif self.action_phase == 'Forwards':
@@ -217,7 +215,7 @@ class ControlsProcess(mp.Process):
                         # check forward end condition
                         if all([abs(e) < DIST_THRESH for e in self.dist_errors]):
                             # self.dist_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
-                            self.serial_send_queue.put(f"forwards:0\n")
+                            self.serial_send_queue.put(f"stop\n")
                             self.action_phase = 'Sideways'
 
                     elif self.action_phase == 'Sideways':
@@ -232,14 +230,12 @@ class ControlsProcess(mp.Process):
                             # self.angle_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
                             # self.center_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
                             # self.dist_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
-                            self.serial_send_queue.put(f"turn:0\n")
-                            self.serial_send_queue.put(f"forwards:0\n")
-                            self.serial_send_queue.put(f"side:0\n")
+                            self.serial_send_queue.put(f"stop\n")
                             self.action_phase = 'Lift'
                         # check side end condition
-                        elif all([abs(e) < ANGLE_THRESH for e in self.angle_errors]):
+                        elif all([abs(e) < ANGLE_THRESH for e in self.angle_errors]) or bbox[0] < 0 or bbox[2] > frame.shape[1]:
                             # self.angle_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
-                            self.serial_send_queue.put(f"side:0\n")
+                            self.serial_send_queue.put(f"stop\n")
                             self.action_phase = 'Turn'
                             self.initial_search_loop = False
                     
