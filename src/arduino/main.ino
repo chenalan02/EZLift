@@ -53,7 +53,6 @@ void loop() {
     if (Serial.available()) {
         String command = Serial.readStringUntil('\n');
         command.trim();
-        
         if (command == "lift1") {
             moveLift(2000);
         } else if (command == "lift2") {
@@ -66,6 +65,10 @@ void loop() {
             digitalWrite(stepperIn3, LOW);
             digitalWrite(stepperIn4, LOW);
             liftDown = true;
+        } else if (command == "stop" || command == "s" ) {
+          moveRobot(0, LOW, LOW, LOW, LOW);
+          digitalWrite(stepperIn3, LOW);
+          digitalWrite(stepperIn4, LOW);
         } else {
             int spaceIndex = command.indexOf(':');
             if (spaceIndex != -1) {
@@ -81,12 +84,8 @@ void loop() {
                 } else if (cmdType == "turn") {
                     if (speed > 0) {
                         moveRobot(speed, HIGH, LOW, LOW, HIGH);
-                        delay(2000);
-                        moveRobot(0, LOW, LOW, LOW, LOW);
                     } else {
                         moveRobot(-speed, LOW, HIGH, HIGH, LOW);
-                        delay(2000);
-                        moveRobot(0, LOW, LOW, LOW, LOW);
                     }
                 } else if (cmdType == "side") {
                     analogWrite(motorEnable, abs(speed));
