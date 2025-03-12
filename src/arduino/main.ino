@@ -27,6 +27,15 @@ void setup() {
     pinMode(limitSwitch, INPUT_PULLUP);
     
     digitalWrite(motorEnable, HIGH);
+    
+    // Lower lift to ground at startup
+    while (digitalRead(limitSwitch) == HIGH) {
+        digitalWrite(stepperIn3, LOW);
+        digitalWrite(stepperIn4, HIGH);
+    }
+    digitalWrite(stepperIn3, LOW);
+    digitalWrite(stepperIn4, LOW);
+    liftDown = true;
 }
 
 void moveLift(int duration) {
@@ -49,6 +58,39 @@ void moveRobot(int speed, int r1, int r2, int l1, int l2) {
     digitalWrite(leftMotorPins[3], l2);
 }
 
+void moveLiftToGround() {
+    while (digitalRead(limitSwitch) == HIGH) {
+        digitalWrite(stepperIn3, LOW);
+        digitalWrite(stepperIn4, HIGH);
+    }
+    digitalWrite(stepperIn3, LOW);
+    digitalWrite(stepperIn4, LOW);
+    liftDown = true;
+}
+
+void grabOffShelf() {
+    moveLift(4000);
+    moveRobot(150, HIGH, LOW, HIGH, LOW);
+    delay(2200);
+    moveRobot(0, LOW, LOW, LOW, LOW);
+    delay(200);
+    moveLift(800);
+    delay(200);
+    moveRobot(150, LOW, HIGH, LOW, HIGH);
+    delay(2500);
+    moveRobot(0, LOW, LOW, LOW, LOW);
+    moveRobot(150, LOW, HIGH, HIGH, LOW);
+    delay(4000);
+    moveRobot(0, LOW, LOW, LOW, LOW);
+    moveRobot(150, HIGH, LOW, HIGH, LOW);
+    delay(1500);
+    moveRobot(0, LOW, LOW, LOW, LOW);
+    moveLiftToGround();
+    moveRobot(255, LOW, HIGH, LOW, HIGH);
+    delay(1000);
+    moveRobot(0, LOW, LOW, LOW, LOW);
+}
+
 void loop() {
     if (Serial.available()) {
         String command = Serial.readStringUntil('\n');
@@ -58,17 +100,13 @@ void loop() {
         } else if (command == "lift2") {
             moveLift(4000);
         } else if (command == "liftgnd") {
-            while (digitalRead(limitSwitch) == HIGH) {
-                digitalWrite(stepperIn3, LOW);
-                digitalWrite(stepperIn4, HIGH);
-            }
+            moveLiftToGround();
+        } else if (command == "stop" || command == "s" ) {
+            moveRobot(0, LOW, LOW, LOW, LOW);
             digitalWrite(stepperIn3, LOW);
             digitalWrite(stepperIn4, LOW);
-            liftDown = true;
-        } else if (command == "stop" || command == "s" ) {
-          moveRobot(0, LOW, LOW, LOW, LOW);
-          digitalWrite(stepperIn3, LOW);
-          digitalWrite(stepperIn4, LOW);
+        } else if (command == "gos") {
+            grabOffShelf();
         } else {
             int spaceIndex = command.indexOf(':');
             if (spaceIndex != -1) {
