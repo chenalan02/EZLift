@@ -64,15 +64,16 @@ class ControlsProcess(mp.Process):
     def _get_angle_from_lines(lines, angle_thresh=2):
 
         lines_polar = []
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
-            dx = x2 - x1
-            dy = y2 - y1
-            angle_rad = math.atan2(-dy, dx)
-            angle_deg = math.degrees(angle_rad)
-            angle_deg = (angle_deg + 360) % 360
-            length = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-            lines_polar.append((angle_deg, length))
+        if lines is not None:
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                dx = x2 - x1
+                dy = y2 - y1
+                angle_rad = math.atan2(-dy, dx)
+                angle_deg = math.degrees(angle_rad)
+                angle_deg = (angle_deg + 360) % 360
+                length = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+                lines_polar.append((angle_deg, length))
 
         lines_polar = sorted(lines_polar, key=lambda x: x[0])
         groups = []
@@ -100,7 +101,7 @@ class ControlsProcess(mp.Process):
 
     def _get_angle_error(self, bbox, img):
 
-        img_cropped = img[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+        img_cropped = img[int(bbox[1]):int(bbox[3]), int(bbox[0]):int(bbox[2])]
         lines = self._hough_line_detection(img_cropped)
         angle = self._get_angle_from_lines(lines)
         if angle > 180:
@@ -109,7 +110,7 @@ class ControlsProcess(mp.Process):
             error = angle - 180
         else:
             error = angle
-            return error
+        return error
 
     def _get_distance_error(self, bbox, img, desired_bbox_ratio=0.5):
 
@@ -167,9 +168,7 @@ class ControlsProcess(mp.Process):
                 if GPIO.input(ESTOP_BUTTON) == 0:
                     print("Emergency stop button pressed")
                     self.idle = True
-                    self.serial_send_queue.put(f"turn:0\n")
-                    self.serial_send_queue.put(f"forwards:0\n")
-                    self.serial_send_queue.put(f"side:0\n")
+                    self.serial_send_queue.put(f"stop\n")
 
                 # check command queue when idle
                 if self.idle:
@@ -199,7 +198,7 @@ class ControlsProcess(mp.Process):
                         # check turn end condition
                         if all([abs(e) < CENTER_THRESH for e in self.center_errors]):
                             # self.center_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
-                            self.serial_send_queue.put(f"turn:0\n")
+                            self.serial_send_queue.put(f"stop\n")
                             self.action_phase = 'Forwards'
  
                     elif self.action_phase == 'Forwards':
@@ -216,7 +215,7 @@ class ControlsProcess(mp.Process):
                         # check forward end condition
                         if all([abs(e) < DIST_THRESH for e in self.dist_errors]):
                             # self.dist_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
-                            self.serial_send_queue.put(f"forwards:0\n")
+                            self.serial_send_queue.put(f"stop\n")
                             self.action_phase = 'Sideways'
 
                     elif self.action_phase == 'Sideways':
@@ -231,14 +230,12 @@ class ControlsProcess(mp.Process):
                             # self.angle_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
                             # self.center_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
                             # self.dist_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
-                            self.serial_send_queue.put(f"turn:0\n")
-                            self.serial_send_queue.put(f"forwards:0\n")
-                            self.serial_send_queue.put(f"side:0\n")
+                            self.serial_send_queue.put(f"stop\n")
                             self.action_phase = 'Lift'
                         # check side end condition
-                        elif all([abs(e) < ANGLE_THRESH for e in self.angle_errors]):
+                        elif all([abs(e) < ANGLE_THRESH for e in self.angle_errors]) or bbox[0] < 0 or bbox[2] > frame.shape[1]:
                             # self.angle_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
-                            self.serial_send_queue.put(f"side:0\n")
+                            self.serial_send_queue.put(f"stop\n")
                             self.action_phase = 'Turn'
                             self.initial_search_loop = False
                     
