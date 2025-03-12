@@ -31,6 +31,6 @@ class VoiceThread(threading.Thread):
             else:
                 if self.rhino.process(pcm):
                     inference = self.rhino.get_inference()
-                    self.command_queue.put(self.rhino.get_inference())
+                    self.command_queue.put(inference)
                     print(inference)
                     awoken = False

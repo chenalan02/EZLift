@@ -74,8 +74,9 @@ void loop() {
             if (spaceIndex != -1) {
                 String cmdType = command.substring(0, spaceIndex);
                 int speed = command.substring(spaceIndex + 1).toInt();
-                
-                if (cmdType == "forwards") {
+                if (cmdType == "lift") {
+                    moveLift(speed);
+                } else if (cmdType == "forwards") {
                     if (speed > 0) {
                         moveRobot(speed, HIGH, LOW, HIGH, LOW);
                     } else {

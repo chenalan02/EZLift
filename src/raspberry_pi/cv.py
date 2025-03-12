@@ -6,14 +6,14 @@ import numpy as np
 from collections import deque
 
 class YOLOProcess(mp.Process):
-    def __init__(self, cv_results_queue, shm_name, shape, dtype, lock, model_path, confidence_threshold=0.5):
+    def __init__(self, cv_results_queue, shm_name, shape, dtype, lock, model_path, conf=0.2):
         super().__init__()
         self.cv_results_queue = cv_results_queue
         self.shared_memory = SharedMemory(name=shm_name)
         self.shared_frame  = np.ndarray(shape, dtype=dtype, buffer=self.shared_memory.buf)
         self.lock = lock
         self.model = YOLO(model_path, task='detect')
-        self.confidence_threshold = confidence_threshold
+        self.conf = conf
         self.fps = 0
         print("cv_init")
 
@@ -24,7 +24,7 @@ class YOLOProcess(mp.Process):
             with self.lock:
 
                 frame = np.copy(self.shared_frame)
-                results = self.model.predict(frame, device="tpu:0", imgsz=256, verbose=False)[0]
+                results = self.model.predict(frame, device="tpu:0", imgsz=256, verbose=False, conf=self.conf)[0]
                 bboxes = results.boxes.xyxy.cpu().numpy()
                 conf = results.boxes.conf.cpu().numpy()
                 cls_id = results.boxes.cls.cpu().numpy()

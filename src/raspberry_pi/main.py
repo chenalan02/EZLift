@@ -22,17 +22,17 @@ if __name__ == "__main__":
 
     shm = SharedMemory(create=True, size=frame.nbytes)
     lock = mp.Lock()
-    cmd_queue = mp.Queue()
-    cv_results_queue = mp.Queue()
+    cmd_queue = mp.Queue(maxsize=10)
+    cv_results_queue = mp.Queue(maxsize=10)
 
     wake_model_path = "/home/pi/EZLift/src/raspberry_pi/Easy-Lift_en_raspberry-pi_v3_0_0.ppn"
     intent_model_path="/home/pi/EZLift/src/raspberry_pi/ezlift_en_raspberry-pi_v3_0_0.rhn"
     access_key="Dwi/yCZhuIbXGkKPNbK/vgoCuRjzFs9XrqZpEmD6mDLGVyYrFv4MuQ=="
-    yolo_path = "/home/pi/EZLift/src/raspberry_pi/256_edgetpu.tflite"
+    yolo_path = "/home/pi/EZLift/src/raspberry_pi/custom_palletsonly_50epochs_edgetpu.tflite"
     
     controls_proc= ControlsProcess(cv_results_queue, cmd_queue)
     camera_thread = CameraThread(shm.name, frame.shape, frame.dtype, lock)
-    yolo_proc = YOLOProcess(cv_results_queue, shm.name, frame.shape, frame.dtype, lock, yolo_path)
+    yolo_proc = YOLOProcess(cv_results_queue, shm.name, frame.shape, frame.dtype, lock, yolo_path, conf=0.25)
     voice_thread = VoiceThread(cmd_queue, access_key, wake_model_path, intent_model_path)
 
     controls_proc.start()
