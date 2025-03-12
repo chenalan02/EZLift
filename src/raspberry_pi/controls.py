@@ -64,15 +64,16 @@ class ControlsProcess(mp.Process):
     def _get_angle_from_lines(lines, angle_thresh=2):
 
         lines_polar = []
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
-            dx = x2 - x1
-            dy = y2 - y1
-            angle_rad = math.atan2(-dy, dx)
-            angle_deg = math.degrees(angle_rad)
-            angle_deg = (angle_deg + 360) % 360
-            length = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
-            lines_polar.append((angle_deg, length))
+        if lines is not None:
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                dx = x2 - x1
+                dy = y2 - y1
+                angle_rad = math.atan2(-dy, dx)
+                angle_deg = math.degrees(angle_rad)
+                angle_deg = (angle_deg + 360) % 360
+                length = np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+                lines_polar.append((angle_deg, length))
 
         lines_polar = sorted(lines_polar, key=lambda x: x[0])
         groups = []
@@ -100,7 +101,7 @@ class ControlsProcess(mp.Process):
 
     def _get_angle_error(self, bbox, img):
 
-        img_cropped = img[bbox[1]:bbox[3], bbox[0]:bbox[2]]
+        img_cropped = img[int(bbox[1]):int(bbox[3]), int(bbox[0]):int(bbox[2])]
         lines = self._hough_line_detection(img_cropped)
         angle = self._get_angle_from_lines(lines)
         if angle > 180:
@@ -109,7 +110,7 @@ class ControlsProcess(mp.Process):
             error = angle - 180
         else:
             error = angle
-            return error
+        return error
 
     def _get_distance_error(self, bbox, img, desired_bbox_ratio=0.5):
 
