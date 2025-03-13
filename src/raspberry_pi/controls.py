@@ -13,18 +13,29 @@ from collections import deque
 
 ESTOP_BUTTON = 17
 
+ERROR_QUEUE_MAXLEN = 2
+CONF_THRESH = 0.38
+
+TURN_INIT_ERROR = 100
+DIST_INIT_ERROR = 10
+ANGLE_INIT_ERROR = 10
+
+MIN_TURN_VOLTAGE = 50
+MIN_FORWARD_VOLTAGE = 60
+MIN_SIDEWAY_VOLTAGE = 60
+
 PALLET_CLS_ID = 0
 ANGLE_THRESH = 2.5 # error in degrees
 DIST_THRESH = 0.03 # error in ratio (pallet width compared to image width)
 CENTER_THRESH = 3.5 # error in horizontal pixel s
+
 INIT_DIST_TARGET = 0.4 # ratio to approach box on initial search loop
 DIST_TARGET = 0.55 # ratio to approach box on subsequent search loops
-ERROR_QUEUE_MAXLEN = 2
-MIN_TURN_VOLTAGE = 50
-MIN_FORWARD_VOLTAGE = 60
-MIN_SIDEWAY_VOLTAGE = 60
-CONF_THRESH = 0.38
+INIT_DIST_TARGET_SHELF = 0.5 # ratio to approach box on initial search loop
+DIST_TARGET_SHELF = 0.8 # ratio to approach box on subsequent search loops
+
 MIN_SHELF_AREA = 40
+SHELF_EDGE_THRESH = 15
 
 class ControlsProcess(mp.Process):
     def __init__(self, cv_results_queue, cmd_queue):
@@ -34,9 +45,14 @@ class ControlsProcess(mp.Process):
         self.shutdown_event = mp.Event()
         
         self.initial_search_loop = True
+        self.initial_shelf_search_loop = True
         self.center_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
         self.dist_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
         self.angle_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+
+        self.center_errors_shelf = deque(maxlen=ERROR_QUEUE_MAXLEN)
+        self.dist_errors_shelf = deque(maxlen=ERROR_QUEUE_MAXLEN)
+        self.angle_errors_shelf = deque(maxlen=ERROR_QUEUE_MAXLEN)
 
         self.idle = True
         self.command = None
@@ -223,6 +239,173 @@ class ControlsProcess(mp.Process):
         else:
             return None
 
+    
+    def turn_box(self, bbox, frame, empty_frame):
+        # get bbox error
+        if not empty_frame:
+            self._get_errors(bbox, frame)
+        # get PD controller output
+        print((np.mean([i for i in self.center_errors])))
+        turn_voltage = self._PD_controller(self.center_errors, kp=0.7, kd=0.1)
+        if turn_voltage > 0 and turn_voltage < MIN_TURN_VOLTAGE:
+            turn_voltage = MIN_TURN_VOLTAGE
+        if turn_voltage < 0 and turn_voltage > -MIN_TURN_VOLTAGE:
+            turn_voltage = -MIN_TURN_VOLTAGE
+        # send turn command
+        self.serial_send_queue.put(f"turn:{turn_voltage}\n")
+        # check pickup end condition
+        if all([abs(e) < ANGLE_THRESH for e in self.angle_errors]) and all([abs(e) < CENTER_THRESH for e in self.center_errors]) and all([abs(e) < DIST_THRESH for e in self.dist_errors]):
+            print((np.mean([i for i in self.center_errors])))
+            print((np.mean([i for i in self.dist_errors])))
+            print((np.mean([i for i in self.angle_errors])))
+            self.serial_send_queue.put(f"stop\n")
+            self.action_phase = 'Lift'
+        # check turn end condition
+        elif all([abs(e) < CENTER_THRESH for e in self.center_errors]):
+            # self.center_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+            self.serial_send_queue.put(f"stop\n")
+            self.action_phase = 'Forwards'
+
+    def forwards_box(self, bbox, frame, empty_frame):
+        if not empty_frame:
+            self._get_errors(bbox, frame)
+        # get PD controller output
+        forwards_voltage = self._PD_controller(self.dist_errors, kp=700, kd=1)
+        print((np.mean([i for i in self.dist_errors])))
+        if forwards_voltage > 0 and forwards_voltage < MIN_FORWARD_VOLTAGE:
+            forwards_voltage = MIN_FORWARD_VOLTAGE
+        if forwards_voltage < 0 and forwards_voltage > -MIN_FORWARD_VOLTAGE:
+            forwards_voltage = -MIN_FORWARD_VOLTAGE
+        # send move command
+        self.serial_send_queue.put(f"forwards:{forwards_voltage}\n")
+        # check forward end condition
+        if all([abs(e) < DIST_THRESH for e in self.dist_errors]):
+            # self.dist_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+            self.serial_send_queue.put(f"stop\n")
+            self.action_phase = 'Sideways'
+
+    def sideways_box(self, empty_frame, bbox, frame):
+        if not empty_frame:
+            self._get_errors(bbox, frame)
+        # get PD controller output
+        side_voltage = self._PD_controller(self.angle_errors, kp=5, kd=0.1)
+        if side_voltage > 0 and side_voltage < MIN_SIDEWAY_VOLTAGE:
+            side_voltage = MIN_SIDEWAY_VOLTAGE
+        if side_voltage < 0 and side_voltage > -MIN_SIDEWAY_VOLTAGE:
+            side_voltage = -MIN_SIDEWAY_VOLTAGE
+        # send move command
+        self.serial_send_queue.put(f"side:{side_voltage}\n")
+        print((np.mean([i for i in self.angle_errors])))
+        # check side end condition
+        if all([abs(e) < ANGLE_THRESH for e in self.angle_errors]) or bbox[0] < 5 or bbox[2] > frame.shape[1] - 5:
+            # self.angle_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
+            self.serial_send_queue.put(f"stop\n")
+            self.action_phase = 'Turn'
+            self.initial_search_loop = False
+
+    def _shelf_near_edges(self, x1, w1, x2, w2, frame_wdith):
+        if x1 < SHELF_EDGE_THRESH or x2 < SHELF_EDGE_THRESH:
+            return True, 'left'
+        elif x1 + w1 > frame_wdith - SHELF_EDGE_THRESH or x2 + w2 > frame_wdith - SHELF_EDGE_THRESH:
+            return True, 'right'
+        else:
+            return False, 'none'
+
+    def _get_errors_shelf(self, frame):
+        shelf = self._detect_shelf(frame)
+        if shelf is not None:
+            x1, y1, w1, h1, x2, y2, w2, h2, angle_deg = shelf
+
+            # center error
+            center_error = x1 + w1//2 + x2 + w2//2 - frame.shape[1]
+            self.center_errors_shelf.append(center_error)
+            
+            # distance error
+            dist_ratio = abs(x2 + w2//2 - x1 - w1//2) / frame.shape[1]
+            if self.initial_shelf_search_loop:
+                dist_error = dist_ratio - INIT_DIST_TARGET_SHELF
+            else:
+                dist_error = dist_ratio - DIST_TARGET_SHELF
+            self.dist_errors_shelf.append(dist_error)
+
+            # angle error
+            angle_error = angle_deg
+            self.angle_errors_shelf.append(angle_error)
+
+            return True, x1, w1, x2, w2
+        else:
+            return None, 0, 0, 0, 0
+
+    def turn_shelf(self, frame):
+        shelf_detected, x1, w1, x2, w2 = self._get_errors_shelf(frame)
+        turn_voltage = self._PD_controller(self.center_errors_shelf, kp=0.7, kd=0.1)
+
+        if turn_voltage > 0 and turn_voltage < MIN_TURN_VOLTAGE:
+            turn_voltage = MIN_TURN_VOLTAGE
+        if turn_voltage < 0 and turn_voltage > -MIN_TURN_VOLTAGE:
+            turn_voltage = -MIN_TURN_VOLTAGE
+
+        if shelf_detected:
+            near_edge, direction = self._shelf_near_edges(x1, w1, x2, w2, frame.shape[1])
+            if near_edge:
+                if direction == 'left':
+                    turn_voltage = -MIN_TURN_VOLTAGE
+                else:
+                    turn_voltage = MIN_TURN_VOLTAGE
+        self.serial_send_queue.put(f"turn:{turn_voltage}\n")
+        print((np.mean([i for i in self.center_errors_shelf])))
+
+        if all([abs(e) < CENTER_THRESH for e in self.center_errors_shelf]):
+
+            self.serial_send_queue.put(f"stop\n")
+            self.action_phase = 'Forwards_shelf'
+        
+    def forwards_shelf(self, frame):
+        self._get_errors_shelf(frame)
+        forwards_voltage = self._PD_controller(self.dist_errors_shelf, kp=700, kd=1)
+        if forwards_voltage > 0 and forwards_voltage < MIN_FORWARD_VOLTAGE:
+            forwards_voltage = MIN_FORWARD_VOLTAGE
+        if forwards_voltage < 0 and forwards_voltage > -MIN_FORWARD_VOLTAGE:
+            forwards_voltage = -MIN_FORWARD_VOLTAGE
+
+        self.serial_send_queue.put(f"forwards:{forwards_voltage}\n")
+        print((np.mean([i for i in self.dist_errors_shelf])))
+
+        if all([abs(e) < DIST_THRESH for e in self.dist_errors_shelf]) and all([abs(e) < CENTER_THRESH for e in self.center_errors_shelf]) and all([abs(e) < ANGLE_THRESH for e in self.angle_errors_shelf]):
+            self.serial_send_queue.put(f"stop\n")
+            self.action_phase = 'Drop_shelf'
+
+        if all([abs(e) < DIST_THRESH for e in self.dist_errors_shelf]):
+            self.serial_send_queue.put(f"stop\n")
+            self.action_phase = 'Sideways_shelf'
+            self.initial_shelf_search_loop = False
+
+    def sideways_shelf(self, frame):
+        shelf_detected, x1, w1, x2, w2 = self._get_errors_shelf(frame)
+        side_voltage = self._PD_controller(self.angle_errors_shelf, kp=5, kd=0.1)
+        if side_voltage > 0 and side_voltage < MIN_SIDEWAY_VOLTAGE:
+            side_voltage = MIN_SIDEWAY_VOLTAGE
+        if side_voltage < 0 and side_voltage > -MIN_SIDEWAY_VOLTAGE:
+            side_voltage = -MIN_SIDEWAY_VOLTAGE
+
+        if shelf_detected:
+            near_edge, direction = self._shelf_near_edges(x1, w1, x2, w2, frame.shape[1])
+            if near_edge:
+                if direction == 'left':
+                    side_voltage = -MIN_SIDEWAY_VOLTAGE
+                else:
+                    side_voltage = MIN_SIDEWAY_VOLTAGE
+
+        self.serial_send_queue.put(f"side:{side_voltage}\n")
+        print((np.mean([i for i in self.angle_errors_shelf])))
+
+        if all([abs(e) < ANGLE_THRESH for e in self.angle_errors_shelf]):
+
+            self.serial_send_queue.put(f"stop\n")
+            self.action_phase = 'Turn_shelf'
+            self.initial_shelf_search_loop = False
+    
+
     def run(self):
 
         # serial_read_thread = threading.Thread(target=self.serial_read_queue)
@@ -265,13 +448,21 @@ class ControlsProcess(mp.Process):
                             self.action_phase = 'Turn'
                             self.idle = False
                             self.initial_search_loop = True
+                            self.initial_shelf_search_loop = True
                             # initialize errors to small values
                             self.center_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
                             self.dist_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
                             self.angle_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
-                            self.center_errors.append(100)
-                            self.dist_errors.append(10)
-                            self.angle_errors.append(10)
+                            self.center_errors.append(TURN_INIT_ERROR)
+                            self.dist_errors.append(DIST_INIT_ERROR)
+                            self.angle_errors.append(ANGLE_INIT_ERROR)
+                            self.center_errors_shelf = deque(maxlen=ERROR_QUEUE_MAXLEN)
+                            self.dist_errors_shelf = deque(maxlen=ERROR_QUEUE_MAXLEN)
+                            self.angle_errors_shelf = deque(maxlen=ERROR_QUEUE_MAXLEN)
+                            self.center_errors_shelf.append(TURN_INIT_ERROR)
+                            self.dist_errors_shelf.append(DIST_INIT_ERROR)
+                            self.angle_errors_shelf.append(ANGLE_INIT_ERROR)
+
                             time.sleep(1)
                         else:
                             print("Command Not Recognized")
@@ -279,67 +470,13 @@ class ControlsProcess(mp.Process):
                 # pickup box
                 elif self.command.intent == "pickup":
                     if self.action_phase == 'Turn':
-                        # get bbox error
-                        if not empty_frame:
-                            self._get_errors(bbox, frame)
-                        # get PD controller output
-                        print((np.mean([i for i in self.center_errors])))
-                        turn_voltage = self._PD_controller(self.center_errors, kp=0.7, kd=0.1)
-                        if turn_voltage > 0 and turn_voltage < MIN_TURN_VOLTAGE:
-                            turn_voltage = MIN_TURN_VOLTAGE
-                        if turn_voltage < 0 and turn_voltage > -MIN_TURN_VOLTAGE:
-                            turn_voltage = -MIN_TURN_VOLTAGE
-                        # send turn command
-                        self.serial_send_queue.put(f"turn:{turn_voltage}\n")
-                        # check pickup end condition
-                        if all([abs(e) < ANGLE_THRESH for e in self.angle_errors]) and all([abs(e) < CENTER_THRESH for e in self.center_errors]) and all([abs(e) < DIST_THRESH for e in self.dist_errors]):
-                            print((np.mean([i for i in self.center_errors])))
-                            print((np.mean([i for i in self.dist_errors])))
-                            print((np.mean([i for i in self.angle_errors])))
-                            self.serial_send_queue.put(f"stop\n")
-                            self.action_phase = 'Lift'
-                        # check turn end condition
-                        elif all([abs(e) < CENTER_THRESH for e in self.center_errors]):
-                            # self.center_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
-                            self.serial_send_queue.put(f"stop\n")
-                            self.action_phase = 'Forwards'
+                        self.turn_box(bbox, frame, empty_frame)
  
                     elif self.action_phase == 'Forwards':
-                        if not empty_frame:
-                            self._get_errors(bbox, frame)
-                        # get PD controller output
-                        forwards_voltage = self._PD_controller(self.dist_errors, kp=700, kd=1)
-                        print((np.mean([i for i in self.dist_errors])))
-                        if forwards_voltage > 0 and forwards_voltage < MIN_FORWARD_VOLTAGE:
-                            forwards_voltage = MIN_FORWARD_VOLTAGE
-                        if forwards_voltage < 0 and forwards_voltage > -MIN_FORWARD_VOLTAGE:
-                            forwards_voltage = -MIN_FORWARD_VOLTAGE
-                        # send move command
-                        self.serial_send_queue.put(f"forwards:{forwards_voltage}\n")
-                        # check forward end condition
-                        if all([abs(e) < DIST_THRESH for e in self.dist_errors]):
-                            # self.dist_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
-                            self.serial_send_queue.put(f"stop\n")
-                            self.action_phase = 'Sideways'
+                        self.forwards_box(bbox, frame, empty_frame)
 
                     elif self.action_phase == 'Sideways':
-                        if not empty_frame:
-                            self._get_errors(bbox, frame)
-                        # get PD controller output
-                        side_voltage = self._PD_controller(self.angle_errors, kp=5, kd=0.1)
-                        if side_voltage > 0 and side_voltage < MIN_SIDEWAY_VOLTAGE:
-                            side_voltage = MIN_SIDEWAY_VOLTAGE
-                        if side_voltage < 0 and side_voltage > -MIN_SIDEWAY_VOLTAGE:
-                            side_voltage = -MIN_SIDEWAY_VOLTAGE
-                        # send move command
-                        self.serial_send_queue.put(f"side:{side_voltage}\n")
-                        print((np.mean([i for i in self.angle_errors])))
-                        # check side end condition
-                        if all([abs(e) < ANGLE_THRESH for e in self.angle_errors]) or bbox[0] < 5 or bbox[2] > frame.shape[1] - 5:
-                            # self.angle_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
-                            self.serial_send_queue.put(f"stop\n")
-                            self.action_phase = 'Turn'
-                            self.initial_search_loop = False
+                        self.sideways_box(empty_frame, bbox, frame)
                     
                     elif self.action_phase == 'Lift':
                         print("Lifting box")
@@ -348,7 +485,36 @@ class ControlsProcess(mp.Process):
                         self.idle = True
 
                 elif self.command == "drop":
+                    if self.action_phase == 'Turn':
+                        self.turn_box(bbox, frame, empty_frame)
+ 
+                    elif self.action_phase == 'Forwards':
+                        self.forwards_box(bbox, frame, empty_frame)
+
+                    elif self.action_phase == 'Sideways':
+                        self.sideways_box(empty_frame, bbox, frame)
                     
+                    elif self.action_phase == 'Lift_box':
+                        print("Dropping box")
+                        self.serial_send_queue.put(f"pog\n")
+                        time.sleep(5)
+                        self.action_phase = 'Turn_shelf'
+
+                    elif self.action_phase == 'Turn_shelf':
+                        self.turn_shelf(frame)
+
+                    elif self.action_phase == 'Forwards_shelf':
+                        self.forwards_shelf(frame)
+
+                    elif self.action_phase == 'Sideways_shelf':
+                        self.sideways_shelf(frame)
+                        
+                    elif self.action_phase == 'Drop_shelf':
+                        print("Dropping box on shelf")
+                        self.serial_send_queue.put(f"dos\n")
+                        time.sleep(1)
+                        self.action_phase = 'Turn'
+                        self.idle = True
 
                 time.sleep(0.03)
         
