@@ -21,18 +21,26 @@ DIST_INIT_ERROR = 10
 ANGLE_INIT_ERROR = 10
 
 MIN_TURN_VOLTAGE = 50
+MIN_TURN_VOLTAGE_SHELF = 65
 MIN_FORWARD_VOLTAGE = 60
 MIN_SIDEWAY_VOLTAGE = 60
 
 PALLET_CLS_ID = 0
 ANGLE_THRESH = 2.5 # error in degrees
 DIST_THRESH = 0.03 # error in ratio (pallet width compared to image width)
+DIST_THRESH_GROUND = 0.09
 CENTER_THRESH = 3.5 # error in horizontal pixel s
+
+ANGLE_THRESH_SHELF = 1.5
 
 INIT_DIST_TARGET = 0.4 # ratio to approach box on initial search loop
 DIST_TARGET = 0.55 # ratio to approach box on subsequent search loops
-INIT_DIST_TARGET_SHELF = 0.5 # ratio to approach box on initial search loop
-DIST_TARGET_SHELF = 0.8 # ratio to approach box on subsequent search loops
+# INIT_DIST_TARGET_GROUND = 0.35
+# DIST_TARGET_GROUND = 0.4
+INIT_DIST_TARGET_GROUND = 0.4
+DIST_TARGET_GROUND = 0.5
+INIT_DIST_TARGET_SHELF = 0.4 # ratio to approach box on initial search loop
+DIST_TARGET_SHELF = 0.6 # ratio to approach box on subsequent search loops
 
 MIN_SHELF_AREA = 40
 SHELF_EDGE_THRESH = 15
@@ -53,6 +61,8 @@ class ControlsProcess(mp.Process):
         self.center_errors_shelf = deque(maxlen=ERROR_QUEUE_MAXLEN)
         self.dist_errors_shelf = deque(maxlen=ERROR_QUEUE_MAXLEN)
         self.angle_errors_shelf = deque(maxlen=ERROR_QUEUE_MAXLEN)
+
+        self.near_edge_counter = 0
 
         self.idle = True
         self.command = None
@@ -169,22 +179,63 @@ class ControlsProcess(mp.Process):
                     best_i = i
         return bbox[best_i]
 
-    def _get_errors(self, bbox, frame):
+    def _get_errors(self, bbox, frame, ground=False):
         self.center_errors.append(self._get_center_error(bbox, frame))
         self.angle_errors.append(self._get_angle_error(bbox, frame))
-        if self.initial_search_loop:
-            self.dist_errors.append(self._get_distance_error(bbox, frame, desired_bbox_ratio=INIT_DIST_TARGET))
+        if not ground:
+            if self.initial_search_loop:
+                self.dist_errors.append(self._get_distance_error(bbox, frame, desired_bbox_ratio=INIT_DIST_TARGET))
+                "cog1"
+            else:
+                "cog2"
+                self.dist_errors.append(self._get_distance_error(bbox, frame, desired_bbox_ratio=DIST_TARGET))
         else:
-            self.dist_errors.append(self._get_distance_error(bbox, frame, desired_bbox_ratio=DIST_TARGET))
+            if self.initial_search_loop:
+                self.dist_errors.append(self._get_distance_error(bbox, frame, desired_bbox_ratio=INIT_DIST_TARGET_GROUND))
+            else:
+                self.dist_errors.append(self._get_distance_error(bbox, frame, desired_bbox_ratio=DIST_TARGET_GROUND))
+
+    def _fill_white_neighbors2(self, gray_img):
+        # Make a copy of the image to avoid modifying the original
+        output = gray_img.copy()
+        
+        # Define the central region (rows 2 to -2) where both top 2 and bottom 2 exist
+        # This assumes that gray_img.shape[0] is the height
+        # For each pixel in rows 2 through (height - 3), we want to check:
+        #    top candidates: row-2 and row-1, and
+        #    bottom candidates: row+1 and row+2.
+        # These slices are arranged so that their first dimension aligns with the central region.
+        
+        # Top neighbor candidates
+        top_candidate1 = gray_img[:-4, :]   # rows 0 to H-4
+        top_candidate2 = gray_img[1:-3, :]   # rows 1 to H-3
+        
+        # Bottom neighbor candidates
+        bottom_candidate1 = gray_img[3:-1, :]  # rows 3 to H-1
+        bottom_candidate2 = gray_img[4:, :]    # rows 4 to H
+        
+        # Check if at least one of the top two pixels is white (255)
+        top_white = (top_candidate1 == 255) | (top_candidate2 == 255)
+        
+        # Check if at least one of the bottom two pixels is white (255)
+        bottom_white = (bottom_candidate1 == 255) | (bottom_candidate2 == 255)
+        
+        # Create a mask for the central region where both conditions are met
+        mask = top_white & bottom_white
+        
+        # Apply the mask to the central region of the output image (rows 2 to -2)
+        output[2:-2, :][mask] = 255
+        
+        return output
 
     def _detect_shelf(self, frame):
         # Convert frame to HSV
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         
         # Define HSV ranges for red
-        lower_red1 = np.array([0, 150, 70])
+        lower_red1 = np.array([0, 200, 0])
         upper_red1 = np.array([10, 255, 255])
-        lower_red2 = np.array([170, 150, 70])
+        lower_red2 = np.array([170, 200, 0])
         upper_red2 = np.array([180, 255, 255])
         
         # Create and combine red masks
@@ -195,6 +246,11 @@ class ControlsProcess(mp.Process):
         # Refine the mask with morphological closing to fill gaps
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
         mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_CLOSE, kernel)
+
+        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        mask_red = cv2.dilate(mask_red, kernel_dilate, iterations=1)
+
+        mask_red = self._fill_white_neighbors2(mask_red)
         
         # Use connected components to extract regions
         num_labels, _, stats, _ = cv2.connectedComponentsWithStats(mask_red, connectivity=8)
@@ -211,7 +267,7 @@ class ControlsProcess(mp.Process):
                 y = stats[i, cv2.CC_STAT_TOP]
                 w = stats[i, cv2.CC_STAT_WIDTH]
                 h = stats[i, cv2.CC_STAT_HEIGHT]
-                if h/w > 5:
+                if h/w > 6:
                     shelf_sides.append((x, y, w, h))
                     # Draw bounding box and centroid on the visualization image
                     cv2.rectangle(mask_red_color, (x, y), (x + w, y + h), (0, 255, 0), 2)
@@ -239,13 +295,12 @@ class ControlsProcess(mp.Process):
         else:
             return None
 
-    
-    def turn_box(self, bbox, frame, empty_frame):
+    def turn_box(self, bbox, frame, empty_frame, ground=False):
         # get bbox error
         if not empty_frame:
-            self._get_errors(bbox, frame)
+            self._get_errors(bbox, frame, ground=ground)
         # get PD controller output
-        print((np.mean([i for i in self.center_errors])))
+        print("center_error: " + str(np.mean([i for i in self.center_errors])))
         turn_voltage = self._PD_controller(self.center_errors, kp=0.7, kd=0.1)
         if turn_voltage > 0 and turn_voltage < MIN_TURN_VOLTAGE:
             turn_voltage = MIN_TURN_VOLTAGE
@@ -253,25 +308,43 @@ class ControlsProcess(mp.Process):
             turn_voltage = -MIN_TURN_VOLTAGE
         # send turn command
         self.serial_send_queue.put(f"turn:{turn_voltage}\n")
+        if ground:
+            dist_thresh = DIST_THRESH_GROUND
+        else:
+            dist_thresh = DIST_THRESH
+        print("cog..")
+        print("center_error: " + str(np.mean([i for i in self.center_errors])) + " " + str(CENTER_THRESH))
+        print("dist_errors: " + str((np.mean([i for i in self.dist_errors]))) + " " + str(dist_thresh))
+        print("angle_errors: " + str((np.mean([i for i in self.angle_errors]))) + " " + str(ANGLE_THRESH))
+        print("cog^")
+        print(all([abs(e) < ANGLE_THRESH for e in self.angle_errors]))
+        print(all([abs(e) < CENTER_THRESH for e in self.center_errors]))
+        print(all([abs(e) < dist_thresh for e in self.dist_errors]))
         # check pickup end condition
-        if all([abs(e) < ANGLE_THRESH for e in self.angle_errors]) and all([abs(e) < CENTER_THRESH for e in self.center_errors]) and all([abs(e) < DIST_THRESH for e in self.dist_errors]):
-            print((np.mean([i for i in self.center_errors])))
-            print((np.mean([i for i in self.dist_errors])))
-            print((np.mean([i for i in self.angle_errors])))
+        if all([abs(e) < ANGLE_THRESH for e in self.angle_errors]) and all([abs(e) < CENTER_THRESH for e in self.center_errors]) and (all([abs(e) < dist_thresh for e in self.dist_errors]) or bbox[3] > frame.shape[1] - 7):
+            print("COGGGG")
             self.serial_send_queue.put(f"stop\n")
-            self.action_phase = 'Lift'
+            if ground:
+                self.action_phase = 'Lift_box'
+            else:
+                self.action_phase = 'Lift'
         # check turn end condition
         elif all([abs(e) < CENTER_THRESH for e in self.center_errors]):
             # self.center_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
             self.serial_send_queue.put(f"stop\n")
             self.action_phase = 'Forwards'
 
-    def forwards_box(self, bbox, frame, empty_frame):
+    def forwards_box(self, bbox, frame, empty_frame, ground=False):
         if not empty_frame:
-            self._get_errors(bbox, frame)
+            self._get_errors(bbox, frame, ground=ground)
         # get PD controller output
-        forwards_voltage = self._PD_controller(self.dist_errors, kp=700, kd=1)
-        print((np.mean([i for i in self.dist_errors])))
+        if ground:
+            forwards_voltage = self._PD_controller(self.dist_errors, kp=700, kd=1)
+        else:
+            forwards_voltage = self._PD_controller(self.dist_errors, kp=700, kd=1)
+        # if(empty_frame):
+        #     print("COOOOG")
+        print("dist_errors: " + str((np.mean([i for i in self.dist_errors]))))
         if forwards_voltage > 0 and forwards_voltage < MIN_FORWARD_VOLTAGE:
             forwards_voltage = MIN_FORWARD_VOLTAGE
         if forwards_voltage < 0 and forwards_voltage > -MIN_FORWARD_VOLTAGE:
@@ -279,14 +352,22 @@ class ControlsProcess(mp.Process):
         # send move command
         self.serial_send_queue.put(f"forwards:{forwards_voltage}\n")
         # check forward end condition
-        if all([abs(e) < DIST_THRESH for e in self.dist_errors]):
+        if ground:
+            dist_thresh = DIST_THRESH_GROUND
+        else:
+            dist_thresh = DIST_THRESH
+        if all([abs(e) < dist_thresh for e in self.dist_errors]):
             # self.dist_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
             self.serial_send_queue.put(f"stop\n")
             self.action_phase = 'Sideways'
+        elif bbox[3] > frame.shape[1] - 7:
+            self.serial_send_queue.put(f"stop\n")
+            print("Hit Bottom")
+            self.action_phase = 'Sideways'
 
-    def sideways_box(self, empty_frame, bbox, frame):
+    def sideways_box(self, empty_frame, bbox, frame, ground=False):
         if not empty_frame:
-            self._get_errors(bbox, frame)
+            self._get_errors(bbox, frame, ground=ground)
         # get PD controller output
         side_voltage = self._PD_controller(self.angle_errors, kp=5, kd=0.1)
         if side_voltage > 0 and side_voltage < MIN_SIDEWAY_VOLTAGE:
@@ -295,7 +376,7 @@ class ControlsProcess(mp.Process):
             side_voltage = -MIN_SIDEWAY_VOLTAGE
         # send move command
         self.serial_send_queue.put(f"side:{side_voltage}\n")
-        print((np.mean([i for i in self.angle_errors])))
+        print("angle_errors: " + str((np.mean([i for i in self.angle_errors]))))
         # check side end condition
         if all([abs(e) < ANGLE_THRESH for e in self.angle_errors]) or bbox[0] < 5 or bbox[2] > frame.shape[1] - 5:
             # self.angle_errors = deque(maxlen=ERROR_QUEUE_MAXLEN)
@@ -317,15 +398,17 @@ class ControlsProcess(mp.Process):
             x1, y1, w1, h1, x2, y2, w2, h2, angle_deg = shelf
 
             # center error
-            center_error = x1 + w1//2 + x2 + w2//2 - frame.shape[1]
+            shelf_center = (x1 + w1//2 + x2 + w2//2) / 2
+            frame_center = frame.shape[1] / 2
+            center_error = shelf_center - frame_center
             self.center_errors_shelf.append(center_error)
             
             # distance error
             dist_ratio = abs(x2 + w2//2 - x1 - w1//2) / frame.shape[1]
             if self.initial_shelf_search_loop:
-                dist_error = dist_ratio - INIT_DIST_TARGET_SHELF
+                dist_error = INIT_DIST_TARGET_SHELF - dist_ratio
             else:
-                dist_error = dist_ratio - DIST_TARGET_SHELF
+                dist_error = DIST_TARGET_SHELF - dist_ratio
             self.dist_errors_shelf.append(dist_error)
 
             # angle error
@@ -338,22 +421,29 @@ class ControlsProcess(mp.Process):
 
     def turn_shelf(self, frame):
         shelf_detected, x1, w1, x2, w2 = self._get_errors_shelf(frame)
-        turn_voltage = self._PD_controller(self.center_errors_shelf, kp=0.7, kd=0.1)
+        turn_voltage = self._PD_controller(self.center_errors_shelf, kp=0.5, kd=0.1)
 
-        if turn_voltage > 0 and turn_voltage < MIN_TURN_VOLTAGE:
-            turn_voltage = MIN_TURN_VOLTAGE
-        if turn_voltage < 0 and turn_voltage > -MIN_TURN_VOLTAGE:
-            turn_voltage = -MIN_TURN_VOLTAGE
+        if turn_voltage > 0 and turn_voltage < MIN_TURN_VOLTAGE_SHELF:
+            turn_voltage = MIN_TURN_VOLTAGE_SHELF
+        if turn_voltage < 0 and turn_voltage > -MIN_TURN_VOLTAGE_SHELF:
+            turn_voltage = -MIN_TURN_VOLTAGE_SHELF
 
         if shelf_detected:
             near_edge, direction = self._shelf_near_edges(x1, w1, x2, w2, frame.shape[1])
             if near_edge:
+                if self.near_edge_counter > 6:
+                    self.serial_send_queue.put(f"stop\n")
+                    self.serial_send_queue.put(f"forwards:-70\n")
+                    time.sleep(2)
+                    self.near_edge_counter = 0
+                print("near_edge")
+                self.near_edge_counter += 1
                 if direction == 'left':
                     turn_voltage = -MIN_TURN_VOLTAGE
                 else:
                     turn_voltage = MIN_TURN_VOLTAGE
         self.serial_send_queue.put(f"turn:{turn_voltage}\n")
-        print((np.mean([i for i in self.center_errors_shelf])))
+        print("center_error:" + str(np.mean([i for i in self.center_errors_shelf])) + " " + str(CENTER_THRESH))
 
         if all([abs(e) < CENTER_THRESH for e in self.center_errors_shelf]):
 
@@ -362,23 +452,23 @@ class ControlsProcess(mp.Process):
         
     def forwards_shelf(self, frame):
         self._get_errors_shelf(frame)
-        forwards_voltage = self._PD_controller(self.dist_errors_shelf, kp=700, kd=1)
+        forwards_voltage = self._PD_controller(self.dist_errors_shelf, kp=100, kd=1)
         if forwards_voltage > 0 and forwards_voltage < MIN_FORWARD_VOLTAGE:
             forwards_voltage = MIN_FORWARD_VOLTAGE
         if forwards_voltage < 0 and forwards_voltage > -MIN_FORWARD_VOLTAGE:
             forwards_voltage = -MIN_FORWARD_VOLTAGE
 
         self.serial_send_queue.put(f"forwards:{forwards_voltage}\n")
-        print((np.mean([i for i in self.dist_errors_shelf])))
+        print("dist_errors:" + str(np.mean([i for i in self.dist_errors_shelf])))
 
         if all([abs(e) < DIST_THRESH for e in self.dist_errors_shelf]) and all([abs(e) < CENTER_THRESH for e in self.center_errors_shelf]) and all([abs(e) < ANGLE_THRESH for e in self.angle_errors_shelf]):
+            print(self.angle_errors_shelf)
             self.serial_send_queue.put(f"stop\n")
             self.action_phase = 'Drop_shelf'
 
-        if all([abs(e) < DIST_THRESH for e in self.dist_errors_shelf]):
+        elif all([abs(e) < DIST_THRESH for e in self.dist_errors_shelf]):
             self.serial_send_queue.put(f"stop\n")
             self.action_phase = 'Sideways_shelf'
-            self.initial_shelf_search_loop = False
 
     def sideways_shelf(self, frame):
         shelf_detected, x1, w1, x2, w2 = self._get_errors_shelf(frame)
@@ -397,9 +487,9 @@ class ControlsProcess(mp.Process):
                     side_voltage = MIN_SIDEWAY_VOLTAGE
 
         self.serial_send_queue.put(f"side:{side_voltage}\n")
-        print((np.mean([i for i in self.angle_errors_shelf])))
+        print("errors_angle: " + str(np.mean([i for i in self.angle_errors_shelf])))
 
-        if all([abs(e) < ANGLE_THRESH for e in self.angle_errors_shelf]):
+        if all([abs(e) < ANGLE_THRESH_SHELF for e in self.angle_errors_shelf]):
 
             self.serial_send_queue.put(f"stop\n")
             self.action_phase = 'Turn_shelf'
@@ -413,6 +503,7 @@ class ControlsProcess(mp.Process):
         # serial_read_thread.start()
         serial_write_thread.start()
         bbox = [0,0,0,0]
+        frame = np.zeros((256, 256, 3), dtype=np.uint8)
 
         try:
             while True:
@@ -484,15 +575,15 @@ class ControlsProcess(mp.Process):
                         self.action_phase = 'Turn'
                         self.idle = True
 
-                elif self.command == "drop":
+                elif self.command.intent == "place":
                     if self.action_phase == 'Turn':
-                        self.turn_box(bbox, frame, empty_frame)
+                        self.turn_box(bbox, frame, empty_frame, ground=True)
  
                     elif self.action_phase == 'Forwards':
-                        self.forwards_box(bbox, frame, empty_frame)
+                        self.forwards_box(bbox, frame, empty_frame, ground=True)
 
                     elif self.action_phase == 'Sideways':
-                        self.sideways_box(empty_frame, bbox, frame)
+                        self.sideways_box(empty_frame, bbox, frame, ground=True)
                     
                     elif self.action_phase == 'Lift_box':
                         print("Dropping box")
@@ -540,6 +631,7 @@ class ControlsProcess(mp.Process):
                 cmd = self.serial_send_queue.get(timeout=1)
                 self.serial_port.write(cmd.encode())
                 # print(f"[Serial Writer] Sent: {cmd.strip()}")
+                # print(self.serial_send_queue.qsize())
             except Empty:
                 pass
             except Exception as e:
